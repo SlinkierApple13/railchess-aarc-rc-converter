@@ -56,3 +56,10 @@
   ]
 }
 ```
+
+#### 小技巧
+
+- 如果有一端呈“灯泡线”状的线路，可以在 `friend_lines` 中设置其与自身跨线运行来达到预期效果。
+- 将 `group_distance` 设为稍大于线路宽度的数值较为稳妥。
+- `merged_lines` 和 `friend_lines` 的实质区别在于，`friend_lines` 跨线需要跨线前后方向偏转角为锐角，而 `merged_lines` 不需要。
+- `merge_consecutive_duplicates` 选项主要是为了处理在 AARC 中画图时同一车站团中的不同车站点均加入了某一条线路的情况。如果确实存在在同一站连续停两次的交路，可以将它设为 `false`，但需要额外留意上述情况。
