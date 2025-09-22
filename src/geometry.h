@@ -75,7 +75,8 @@ struct StationGroup {
 
 struct Map {
     struct Config {
-        int maximum_service_length = 256;
+        int max_length = 128;
+        int max_length_special = 32;
         double auto_group_distance = 30.0;
         bool merge_consecutive_duplicates = true;
         
@@ -113,6 +114,7 @@ struct Map {
     
     std::unordered_set<std::pair<int, int>> friend_lines;
     std::unordered_set<std::pair<int, int>> merged_lines;
+    std::unordered_set<int> special_lines;
 
     bool can_move_through(int point1_id, int point2_id, int point3_id) const;
     Position group_pos(int group_id) const;

@@ -1,4 +1,5 @@
 #include <queue>
+#include <iostream>
 
 #include "converter.h"
 
@@ -43,6 +44,11 @@ struct Track {
 
 struct Point : geometry::Point {
     std::vector<Track> tracks;
+};
+
+struct RouteEntry {
+    std::vector<Track> tracks;
+    bool is_special = false;
 };
 
 void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
@@ -161,28 +167,56 @@ void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
         return result;
     };
 
+    auto is_too_long = [&](const RouteEntry& entry) {
+        if (entry.tracks.size() >= geomap.config.max_length) return true;
+        if (entry.is_special && entry.tracks.size() >= geomap.config.max_length_special * 2) return true;
+        return false;
+    };
+
     // search possible routes
-    std::queue<std::vector<Track>> q;
+    std::queue<RouteEntry> q;
     for (const auto& [line_id, line] : geomap.lines) {
         if (line.point_ids.size() < 2) continue;
-        q.push({Track(line.point_ids.front(), line_id, 0, true)});
-        q.push({Track(line.point_ids.back(), line_id, static_cast<int>(line.point_ids.size()) - 1, false)});
+        q.push({
+            {Track(line.point_ids.front(), line_id, 0, true)}, 
+            geomap.special_lines.contains(line_id)
+        });
+        q.push({
+            {Track(line.point_ids.back(), line_id, static_cast<int>(line.point_ids.size()) - 1, false)}, 
+            geomap.special_lines.contains(line_id)
+        });
+        if (!geomap.special_lines.contains(line_id)) continue;
+        for (
+            size_t i = geomap.config.max_length_special; 
+            i + 1 < line.point_ids.size(); 
+            i += geomap.config.max_length_special
+        ) {
+            q.push({
+                {Track(line.point_ids[i], line_id, static_cast<int>(i), true)}, 
+                true
+            });
+            q.push({
+                {Track(line.point_ids[i], line_id, static_cast<int>(i), false)}, 
+                true
+            });
+        }
     }
 
     // do breadth-first search; no need to track visited states as we care about all possible routes
     while (!q.empty()) {
-        std::vector<Track> route = std::move(q.front());
+        RouteEntry entry = std::move(q.front());
         q.pop();
-        const Track& last_track = route.back();
+        bool is_special = entry.is_special;
+        const Track& last_track = entry.tracks.back();
         std::vector<Track> nexts = next_tracks(last_track);
-        if (nexts.empty() || route.size() >= static_cast<size_t>(geomap.config.maximum_service_length)) {
-            add_line(route);
+        if (nexts.empty() || is_too_long(entry)) {
+            add_line(entry.tracks);
             continue;
         }
         for (const auto& next : nexts) {
-            route.push_back(next);
-            q.push(route);
-            route.pop_back();
+            entry.tracks.push_back(next);
+            q.push({entry.tracks, is_special || geomap.special_lines.contains(next.line_id)});
+            entry.tracks.pop_back();
         }
     }
 }

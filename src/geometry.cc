@@ -212,8 +212,11 @@ Map::Map(const nlohmann::json& aarc, const nlohmann::json& config_json) {
     }
     
     // parse config
-    if (config_json.contains("maximum_service_length")) {
-        config.maximum_service_length = config_json["maximum_service_length"].get<int>();
+    if (config_json.contains("max_length")) {
+        config.max_length = config_json["max_length"].get<int>();
+    }
+    if (config_json.contains("segmentation_length")) {
+        config.max_length_special = config_json["segmentation_length"].get<int>();
     }
     if (config_json.contains("raw_group_distance")) {
         config.auto_group_distance = config_json["raw_group_distance"].get<double>();
@@ -296,6 +299,29 @@ Map::Map(const nlohmann::json& aarc, const nlohmann::json& config_json) {
             }
             if (line_ids[0] != -1 && line_ids[1] != -1) {
                 merge_lines(line_ids[0], line_ids[1], true);
+            }
+        }
+    }
+
+    if (config_json.contains("segmented_lines")) {
+        for (const auto& entry : config_json["segmented_lines"]) {
+            int line_id = -1;
+            if (entry.is_string()) {
+                std::string name = entry.get<std::string>();
+                for (const auto& [id, line] : lines) {
+                    if (line.name == name) {
+                        line_id = id;
+                        break;
+                    }
+                }
+            } else if (entry.is_number_integer()) {
+                int id = entry.get<int>();
+                if (lines.find(id) != lines.end()) {
+                    line_id = id;
+                }
+            }
+            if (line_id != -1) {
+                special_lines.insert(line_id);
             }
         }
     }
