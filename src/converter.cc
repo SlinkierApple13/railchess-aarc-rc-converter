@@ -48,6 +48,7 @@ struct Point : geometry::Point {
 struct RouteEntry {
     std::vector<Track> tracks;
     bool is_special = false;
+    int base_size = 0;
 };
 
 void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
@@ -168,7 +169,9 @@ void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
 
     auto is_too_long = [&](const RouteEntry& entry) {
         if (entry.tracks.size() >= geomap.config.max_length) return true;
-        if (entry.is_special && entry.tracks.size() >= geomap.config.max_length_special * 2) return true;
+        if (entry.is_special && 
+            entry.tracks.size() >= geomap.config.max_length_special * 2 + entry.base_size
+        ) return true;
         return false;
     };
 
@@ -214,7 +217,12 @@ void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
         }
         for (const auto& next : nexts) {
             entry.tracks.push_back(next);
-            q.push({entry.tracks, is_special || geomap.special_lines.contains(next.line_id)});
+            RouteEntry new_entry = entry;
+            if (geomap.special_lines.contains(next.line_id) && !is_special) {
+                new_entry.is_special = true;
+                new_entry.base_size = static_cast<int>(entry.tracks.size());
+            }
+            q.push(std::move(new_entry));
             entry.tracks.pop_back();
         }
     }
