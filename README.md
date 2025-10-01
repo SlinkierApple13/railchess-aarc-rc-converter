@@ -27,13 +27,13 @@
 |设置项|用途|默认|
 |---|---|---|
 |`max_length`|交路的最大长度 (车站与参考点的总数；下同) 参数 (一般情况下该参数无需调整；如果生成的交路不完整，请调大这一数值)。|`128`|
-|`segmentation_length`|对复杂交路拆分处理时的交路最大长度（该数值应取为轨交棋随机数最大值的两倍至四倍）。|`32`|
+|`segmentation_length`|对复杂交路分段处理时的交路最大长度（该数值应大于轨交棋中随机数的最大值）。|`32`|
 |`group_distance`|将多个车站合并的距离阈值 (单位：`30px`).|`1.0`|
-|`merge_consecutive_duplicates`|是否允许同一交路的相邻两站是同一个车站。|`true`|
+|`merge_consecutive_duplicates`|如果同一交路的相邻两站是同一车站且该设置项为 `true`，合并之。|`true`|
 |`link_modes`|对不同车站连线的处理；具体见样例。支持五种不同的连线：粗线 `ThickLine`，细线 `ThinLine`，虚线 (原色) `DottedLine1`，虚线 (覆盖) `DottedLine2`，车站团 `Group`；对每种连线有三种处理方式：合并 `Group`，(用一条线路) 连接 `Connect`，忽略 `None`.| 粗线：连接，细线：连接，虚线：忽略，车站团：合并
 |`friend_lines`|可跨线运行的线路列表。(可以用输入文件中的线路编号或线路名称表示线路；下同。)|无|
 |`merged_lines`|贯通运行的线路列表。|无|
-|`segmented_lines`|需要拆分处理的线路。|无|
+|`segmented_lines`|分段处理的线路列表。|无|
 
 #### 配置文件例
 

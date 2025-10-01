@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 
 #include "geometry.h"
@@ -75,6 +76,512 @@ Vec2& Vec2::operator/=(double scalar) {
 
 bool Vec2::operator==(const Vec2& other) const {
     return x == other.x && y == other.y;
+}
+
+// Helper enum for position relationships between two points
+enum class PosRel {
+    Same,        // 's' - same position
+    Left,        // 'l' - purely horizontal
+    LeftLeftUp,  // 'llu' - more left than up
+    LeftUp,      // 'lu' - diagonal left-up (45 degrees)
+    LeftUpUp,    // 'luu' - more up than left
+    Up,          // 'u' - purely vertical
+    UpUpRight,   // 'uur' - more up than right
+    UpRight,     // 'ur' - diagonal up-right (45 degrees)
+    UpRightRight // 'urr' - more right than up
+};
+
+// Helper function to determine position relationship
+struct RelResult {
+    PosRel pos_rel;
+    bool reversed;
+};
+
+static const double EPSILON = 1e-9;
+
+static bool is_zero(double val) {
+    return std::abs(val) < EPSILON;
+}
+
+static RelResult coord_rel_diff(double x_diff, double y_diff) {
+    if (is_zero(x_diff)) {
+        if (is_zero(y_diff))
+            return {PosRel::Same, false};
+        return {PosRel::Up, y_diff > 0};
+    }
+    if (is_zero(y_diff)) {
+        return {PosRel::Left, x_diff > 0};
+    }
+    if (is_zero(x_diff - y_diff)) {
+        return {PosRel::LeftUp, x_diff > 0};
+    }
+    if (is_zero(x_diff + y_diff)) {
+        return {PosRel::UpRight, y_diff > 0};
+    }
+    if ((y_diff > 0 && x_diff > y_diff) || (y_diff < 0 && x_diff < y_diff)) {
+        return {PosRel::LeftLeftUp, y_diff > 0};
+    }
+    if ((x_diff > 0 && y_diff > x_diff) || (x_diff < 0 && y_diff < x_diff)) {
+        return {PosRel::LeftUpUp, x_diff > 0};
+    }
+    if ((y_diff > 0 && -x_diff < y_diff) || (y_diff < 0 && x_diff < -y_diff)) {
+        return {PosRel::UpUpRight, y_diff > 0};
+    }
+    return {PosRel::UpRightRight, x_diff < 0};
+}
+
+// Helper function to fill intermediate points
+enum class FillType {
+    Top,
+    Bottom,
+    MidVert,
+    MidInc
+};
+
+static std::vector<Position> coord_fill_unordered(
+    const Position& a, const Position& b, 
+    double x_diff, double y_diff,
+    PosRel pos_rel, FillType type
+) {
+    // For simple relations, no intermediate points needed
+    if (pos_rel == PosRel::Left || pos_rel == PosRel::Up || 
+        pos_rel == PosRel::LeftUp || pos_rel == PosRel::UpRight) {
+        return {};
+    }
+    
+    if (pos_rel == PosRel::LeftLeftUp) {
+        double bias = -x_diff + y_diff;
+        if (type == FillType::Top) {
+            return {{a.x + bias, a.y}};
+        } else if (type == FillType::Bottom) {
+            return {{b.x - bias, b.y}};
+        } else if (type == FillType::MidInc) {
+            bias = bias / 2.0;
+            return {{a.x + bias, a.y}, {b.x - bias, b.y}};
+        } else { // MidVert
+            bias = -y_diff / 2.0;
+            return {{a.x + bias, a.y + bias}, {b.x - bias, b.y - bias}};
+        }
+    } else if (pos_rel == PosRel::LeftUpUp) {
+        double bias = x_diff - y_diff;
+        if (type == FillType::Top) {
+            return {{b.x, b.y - bias}};
+        } else if (type == FillType::Bottom) {
+            return {{a.x, a.y + bias}};
+        } else if (type == FillType::MidInc) {
+            bias = bias / 2.0;
+            return {{a.x, a.y + bias}, {b.x, b.y - bias}};
+        } else { // MidVert
+            bias = -x_diff / 2.0;
+            return {{a.x + bias, a.y + bias}, {b.x - bias, b.y - bias}};
+        }
+    } else if (pos_rel == PosRel::UpUpRight) {
+        double bias = -x_diff - y_diff;
+        if (type == FillType::Top) {
+            return {{b.x, b.y - bias}};
+        } else if (type == FillType::Bottom) {
+            return {{a.x, a.y + bias}};
+        } else if (type == FillType::MidInc) {
+            bias = bias / 2.0;
+            return {{a.x, a.y + bias}, {b.x, b.y - bias}};
+        } else { // MidVert
+            bias = -x_diff / 2.0;
+            return {{a.x + bias, a.y - bias}, {b.x - bias, b.y + bias}};
+        }
+    } else if (pos_rel == PosRel::UpRightRight) {
+        double bias = x_diff + y_diff;
+        if (type == FillType::Top) {
+            return {{a.x - bias, a.y}};
+        } else if (type == FillType::Bottom) {
+            return {{b.x + bias, b.y}};
+        } else if (type == FillType::MidInc) {
+            bias = bias / 2.0;
+            return {{a.x - bias, a.y}, {b.x + bias, b.y}};
+        } else { // MidVert
+            bias = y_diff / 2.0;
+            return {{a.x + bias, a.y - bias}, {b.x - bias, b.y + bias}};
+        }
+    }
+    
+    return {};
+}
+
+static std::vector<Position> coord_fill(const Position& a, const Position& b,
+                                        double x_diff, double y_diff,
+                                        PosRel pos_rel, bool reversed, FillType type) {
+    auto result = coord_fill_unordered(a, b, x_diff, y_diff, pos_rel, type);
+    if (reversed) {
+        std::reverse(result.begin(), result.end());
+    }
+    return result;
+}
+
+// Helper structures for formalization
+struct FormalSegment {
+    Position a;
+    std::vector<Position> itp;  // intermediate points
+    Position b;
+    int ill;  // ill-posed level: 0=good, 1=one intermediate, 2=problematic
+};
+
+// Ray structure for intersection calculations
+struct Ray {
+    Position source;
+    Vec2 direction;  // normalized direction vector
+};
+
+static Ray create_ray(const Position& from, const Position& to) {
+    Vec2 dir = to - from;
+    double len = dir.length();
+    if (len < EPSILON) {
+        return {from, {0, 0}};
+    }
+    return {from, dir / len};
+}
+
+static bool rays_perpendicular(const Ray& a, const Ray& b) {
+    return std::abs(a.direction.dot(b.direction)) < EPSILON;
+}
+
+static bool rays_parallel(const Ray& a, const Ray& b) {
+    return std::abs(a.direction.cross(b.direction)) < EPSILON;
+}
+
+static double ray_to_point_distance(const Ray& ray, const Position& point) {
+    Vec2 to_point = point - ray.source;
+    // For axis-aligned and diagonal rays, calculate perpendicular distance
+    double cross = std::abs(ray.direction.cross(to_point));
+    return cross;
+}
+
+static Position ray_intersect(const Ray& a, const Ray& b, bool perp_only = false) {
+    if (rays_parallel(a, b)) {
+        return {NAN, NAN};  // No intersection
+    }
+    if (perp_only && !rays_perpendicular(a, b)) {
+        return {NAN, NAN};
+    }
+    
+    // Calculate intersection point using parametric form
+    // a.source + t * a.direction = b.source + s * b.direction
+    Vec2 diff = b.source - a.source;
+    double cross = a.direction.cross(b.direction);
+    
+    if (std::abs(cross) < EPSILON) {
+        return {NAN, NAN};
+    }
+    
+    double t = diff.cross(b.direction) / cross;
+    
+    Position result = a.source + a.direction * t;
+    return result;
+}
+
+static Ray rotate_ray_90(const Ray& ray) {
+    return {ray.source, ray.direction.perpendicular()};
+}
+
+// Formalize a segment between two points
+static FormalSegment formalize_segment(const Point& point_a, const Point& point_b) {
+    double x_diff = point_a.pos.x - point_b.pos.x;
+    double y_diff = point_a.pos.y - point_b.pos.y;
+    
+    RelResult rel = coord_rel_diff(x_diff, y_diff);
+    PosRel pr = rel.pos_rel;
+    bool rv = rel.reversed;
+    
+    // If points are at same position
+    if (pr == PosRel::Same) {
+        return {point_a.pos, {}, point_b.pos, 0};
+    }
+    
+    const Point* p_a = &point_a;
+    const Point* p_b = &point_b;
+    
+    if (rel.reversed) {
+        std::swap(p_a, p_b);
+        x_diff = -x_diff;
+        y_diff = -y_diff;
+    }
+    
+    std::vector<Position> itp;
+    int ill = 0;
+    
+    if (p_a->dir == p_b->dir) {
+        // Both points have same direction
+        if (p_a->dir == Point::Direction::Diagonal) {
+            itp = coord_fill(p_a->pos, p_b->pos, x_diff, y_diff, pr, rv, FillType::MidVert);
+        } else {
+            itp = coord_fill(p_a->pos, p_b->pos, x_diff, y_diff, pr, rv, FillType::MidInc);
+        }
+        
+        if (itp.empty()) {
+            // Check if this is ill-posed
+            if ((p_a->dir == Point::Direction::Orthogonal && (pr == PosRel::LeftUp || pr == PosRel::UpRight))
+                || (p_a->dir == Point::Direction::Diagonal && (pr == PosRel::Left || pr == PosRel::Up))) {
+                ill = 2;  // Highly problematic
+            } else {
+                ill = 0;  // OK, no intermediate points needed
+            }
+        } else {
+            ill = 1;  // Has intermediate points
+        }
+    } else if (p_a->dir == Point::Direction::Diagonal) {
+        // Point a is diagonal, point b is orthogonal
+        if (pr == PosRel::LeftUpUp || pr == PosRel::UpUpRight) {
+            itp = coord_fill(p_a->pos, p_b->pos, x_diff, y_diff, pr, rv, FillType::Top);
+        } else {
+            itp = coord_fill(p_a->pos, p_b->pos, x_diff, y_diff, pr, rv, FillType::Bottom);
+        }
+    } else {
+        // Point a is orthogonal, point b is diagonal
+        if (pr == PosRel::LeftUpUp || pr == PosRel::UpUpRight) {
+            itp = coord_fill(p_a->pos, p_b->pos, x_diff, y_diff, pr, rv, FillType::Bottom);
+        } else {
+            itp = coord_fill(p_a->pos, p_b->pos, x_diff, y_diff, pr, rv, FillType::Top);
+        }
+    }
+    
+    return {point_a.pos, itp, point_b.pos, ill};
+}
+
+// Correct ill-posed segments using neighboring segments
+static void ill_posed_segment_justify(std::vector<FormalSegment>& segs) {
+    if (segs.size() <= 1) {
+        return;
+    }
+    
+    // Find all ill-posed segments
+    std::vector<size_t> ill_idxs;
+    for (size_t i = 0; i < segs.size(); i++) {
+        if (segs[i].ill > 0) {
+            ill_idxs.push_back(i);
+        }
+    }
+    
+    // Correct each ill-posed segment
+    for (size_t i : ill_idxs) {
+        FormalSegment& this_seg = segs[i];
+        
+        if (i > 0 && i < segs.size() - 1) {
+            // Middle segment: correct using both neighbors
+            const FormalSegment& prev_seg = segs[i - 1];
+            const FormalSegment& next_seg = segs[i + 1];
+            
+            bool prev_helps = prev_seg.ill < this_seg.ill;
+            bool next_helps = next_seg.ill < this_seg.ill;
+            
+            if (prev_helps && next_helps) {
+                // Get reference points
+                Position prev_ref = prev_seg.itp.empty() ? prev_seg.a : prev_seg.itp.back();
+                Position next_ref = next_seg.itp.empty() ? next_seg.b : next_seg.itp.front();
+                
+                // Create rays
+                Ray prev_ray = create_ray(prev_ref, prev_seg.b);
+                Ray next_ray = create_ray(next_ref, next_seg.a);
+                
+                // Find intersection
+                Position itsc = ray_intersect(prev_ray, next_ray, true);
+                if (!std::isnan(itsc.x)) {
+                    this_seg.itp = {itsc};
+                }
+            }
+        } else {
+            // End segment: correct using nearest neighbor
+            auto correct_end = [&](const Position& neib_ref, const Position& share,
+                                  const Position* this_ref, const Position& this_tip) -> Position {
+                Ray neib_ray = create_ray(neib_ref, share);
+                
+                if (!this_ref) {
+                    // If only the tip point exists in the segment
+                    if (ray_to_point_distance(neib_ray, this_tip) < EPSILON) {
+                        // Tip is already on the neighbor ray extension
+                        return {NAN, NAN};
+                    }
+                    // Create perpendicular ray from tip
+                    Ray this_ray = rotate_ray_90(neib_ray);
+                    this_ray.source = this_tip;
+                    return ray_intersect(neib_ray, this_ray, true);
+                } else {
+                    // If segment has other points besides tip
+                    Ray this_ray = create_ray(*this_ref, share);
+                    this_ray.source = this_tip;
+                    if (rays_perpendicular(neib_ray, this_ray)) {
+                        return ray_intersect(neib_ray, this_ray, true);
+                    }
+                }
+                return {NAN, NAN};
+            };
+            
+            Position itsc{NAN, NAN};
+            
+            if (i == segs.size() - 1) {
+                // Last segment
+                const FormalSegment& prev_seg = segs[i - 1];
+                bool can_help = prev_seg.ill <= this_seg.ill && prev_seg.ill < 2;
+                bool need_help = this_seg.ill > 0;
+                
+                if (need_help && can_help) {
+                    Position neib_ref = prev_seg.itp.empty() ? prev_seg.a : prev_seg.itp.back();
+                    Position share = this_seg.a;
+                    const Position* this_ref = this_seg.itp.size() > 1 ? &this_seg.itp[0] : nullptr;
+                    Position this_tip = this_seg.b;
+                    itsc = correct_end(neib_ref, share, this_ref, this_tip);
+                }
+            } else if (i == 0) {
+                // First segment
+                const FormalSegment& next_seg = segs[i + 1];
+                bool can_help = next_seg.ill <= this_seg.ill && next_seg.ill < 2;
+                bool need_help = this_seg.ill > 0;
+                
+                if (can_help && need_help) {
+                    Position neib_ref = next_seg.itp.empty() ? next_seg.b : next_seg.itp.front();
+                    Position share = this_seg.b;
+                    const Position* this_ref = this_seg.itp.size() > 1 ? &this_seg.itp[1] : nullptr;
+                    Position this_tip = this_seg.a;
+                    itsc = correct_end(neib_ref, share, this_ref, this_tip);
+                }
+            }
+            
+            if (!std::isnan(itsc.x)) {
+                this_seg.itp = {itsc};
+            }
+        }
+    }
+}
+
+void add_auxiliary_points(Map& map) {
+    auto get_max_point_id = [&]() {
+        int max_id = 0;
+        for (const auto& [id, point] : map.points) {
+            if (id > max_id) max_id = id;
+        }
+        return max_id;
+    };
+    int next_id = get_max_point_id() + 1;
+
+    // Process each line to add auxiliary points
+    for (auto& [line_id, line] : map.lines) {
+        if (line.point_ids.size() < 2) {
+            continue;
+        }
+
+        // Check if this is a loop/ring (first and last points are the same)
+        bool is_ring = line.is_loop;
+        
+        std::vector<FormalSegment> formal_segs;
+        
+        if (!is_ring) {
+            // Non-ring line: process segments normally
+            for (size_t i = 0; i < line.point_ids.size() - 1; i++) {
+                int point_a_id = line.point_ids[i];
+                int point_b_id = line.point_ids[i + 1];
+                
+                if (!map.points.contains(point_a_id) || !map.points.contains(point_b_id)) {
+                    continue;
+                }
+                
+                const Point& point_a = map.points.at(point_a_id);
+                const Point& point_b = map.points.at(point_b_id);
+                
+                FormalSegment seg = formalize_segment(point_a, point_b);
+                formal_segs.push_back(seg);
+            }
+        } else {
+            // Ring line: add margin segments for proper correction
+            // Add head margin segment (second-to-last to first)
+            if (line.point_ids.size() >= 3) {
+                int a_id = line.point_ids[line.point_ids.size() - 2];
+                int b_id = line.point_ids[0];
+                
+                if (map.points.contains(a_id) && map.points.contains(b_id)) {
+                    const Point& point_a = map.points.at(a_id);
+                    const Point& point_b = map.points.at(b_id);
+                    FormalSegment head_margin = formalize_segment(point_a, point_b);
+                    formal_segs.push_back(head_margin);
+                }
+            }
+            
+            // Add normal segments
+            for (size_t i = 0; i < line.point_ids.size() - 1; i++) {
+                int point_a_id = line.point_ids[i];
+                int point_b_id = line.point_ids[i + 1];
+                
+                if (!map.points.contains(point_a_id) || !map.points.contains(point_b_id)) {
+                    continue;
+                }
+                
+                const Point& point_a = map.points.at(point_a_id);
+                const Point& point_b = map.points.at(point_b_id);
+                
+                FormalSegment seg = formalize_segment(point_a, point_b);
+                formal_segs.push_back(seg);
+            }
+            
+            // Add tail margin segment (last to second)
+            if (line.point_ids.size() >= 3) {
+                int c_id = line.point_ids[line.point_ids.size() - 1];
+                int d_id = line.point_ids[1];
+                
+                if (map.points.contains(c_id) && map.points.contains(d_id)) {
+                    const Point& point_c = map.points.at(c_id);
+                    const Point& point_d = map.points.at(d_id);
+                    FormalSegment tail_margin = formalize_segment(point_c, point_d);
+                    formal_segs.push_back(tail_margin);
+                }
+            }
+        }
+        
+        // Apply ill-posed correction
+        ill_posed_segment_justify(formal_segs);
+        
+        if (formal_segs.empty()) {
+            continue;
+        }
+        
+        // Remove margin segments for rings
+        if (is_ring && formal_segs.size() > 2) {
+            formal_segs.erase(formal_segs.begin());  // Remove head margin
+            formal_segs.pop_back();                   // Remove tail margin
+        }
+        
+        // Build new point list with auxiliary points
+        std::vector<int> new_point_ids;
+        new_point_ids.push_back(line.point_ids[0]);
+        
+        for (size_t i = 0; i < formal_segs.size(); i++) {
+            const FormalSegment& seg = formal_segs[i];
+            
+            // Add intermediate points for this segment
+            for (const Position& aux_pos : seg.itp) {
+                Point aux_point;
+                aux_point.id = next_id++;
+                aux_point.name = "";
+                aux_point.pos = aux_pos;
+                aux_point.dir = Point::Direction::Orthogonal;
+                aux_point.type = Point::Type::Node;
+                
+                map.points[aux_point.id] = aux_point;
+                new_point_ids.push_back(aux_point.id);
+            }
+            
+            // Add the end point of this segment (which is the start of next segment)
+            // For the last segment, add the actual endpoint
+            if (i < line.point_ids.size() - 1) {
+                new_point_ids.push_back(line.point_ids[i + 1]);
+            }
+        }
+        
+        // For non-ring lines, ensure the last point is included
+        if (!is_ring && !line.point_ids.empty()) {
+            if (new_point_ids.empty() || new_point_ids.back() != line.point_ids.back()) {
+                new_point_ids.push_back(line.point_ids.back());
+            }
+        }
+        
+        // Update the line with new point IDs including auxiliary points
+        line.point_ids = new_point_ids;
+    }
 }
 
 bool Map::can_move_through(int point1_id, int point2_id, int point3_id) const {
@@ -325,6 +832,9 @@ Map::Map(const nlohmann::json& aarc, const nlohmann::json& config_json) {
             }
         }
     }
+
+    // add auxiliary points
+    add_auxiliary_points(*this);
 
     // load point links
     if (aarc.contains("pointLinks")) {

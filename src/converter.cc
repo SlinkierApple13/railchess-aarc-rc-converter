@@ -49,6 +49,27 @@ struct RouteEntry {
     std::vector<Track> tracks;
     bool is_special = false;
     int base_size = 0;
+    int station_count = 0;
+
+    void push_back(const Track& track, const geometry::Map& geomap) {
+        tracks.push_back(track);
+        if (geomap.points.contains(track.point_id) && geomap.points.at(track.point_id).type == geometry::Point::Type::Station) {
+            station_count++;
+        }
+    }
+
+    void pop_back(const geometry::Map& geomap) {
+        if (tracks.empty()) return;
+        const Track& track = tracks.back();
+        if (geomap.points.contains(track.point_id) && geomap.points.at(track.point_id).type == geometry::Point::Type::Station) {
+            station_count--;
+        }
+        tracks.pop_back();
+    }
+
+    int stations() const {
+        return station_count;
+    }
 };
 
 void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
@@ -168,9 +189,9 @@ void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
     };
 
     auto is_too_long = [&](const RouteEntry& entry) {
-        if (entry.tracks.size() >= geomap.config.max_length) return true;
+        if (entry.stations() >= geomap.config.max_length) return true;
         if (entry.is_special && 
-            entry.tracks.size() >= geomap.config.max_length_special * 2 + entry.base_size
+            entry.stations() >= geomap.config.max_length_special * 2 + entry.base_size
         ) return true;
         return false;
     };
@@ -179,28 +200,32 @@ void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
     std::queue<RouteEntry> q;
     for (const auto& [line_id, line] : geomap.lines) {
         if (line.point_ids.size() < 2) continue;
-        q.push({
-            {Track(line.point_ids.front(), line_id, 0, true)}, 
-            geomap.special_lines.contains(line_id)
-        });
-        q.push({
-            {Track(line.point_ids.back(), line_id, static_cast<int>(line.point_ids.size()) - 1, false)}, 
-            geomap.special_lines.contains(line_id)
-        });
+        
+        RouteEntry entry1;
+        entry1.push_back(Track(line.point_ids.front(), line_id, 0, true), geomap);
+        entry1.is_special = geomap.special_lines.contains(line_id);
+        q.push(std::move(entry1));
+
+        RouteEntry entry2;
+        entry2.push_back(Track(line.point_ids.back(), line_id, static_cast<int>(line.point_ids.size()) - 1, false), geomap);
+        entry2.is_special = geomap.special_lines.contains(line_id);
+        q.push(std::move(entry2));
+
         if (!geomap.special_lines.contains(line_id)) continue;
         for (
             size_t i = geomap.config.max_length_special; 
             i + 1 < line.point_ids.size(); 
             i += geomap.config.max_length_special
         ) {
-            q.push({
-                {Track(line.point_ids[i], line_id, static_cast<int>(i), true)}, 
-                true
-            });
-            q.push({
-                {Track(line.point_ids[i], line_id, static_cast<int>(i), false)}, 
-                true
-            });
+            RouteEntry entry3;
+            entry3.push_back(Track(line.point_ids[i], line_id, static_cast<int>(i), true), geomap);
+            entry3.is_special = true;
+            q.push(std::move(entry3));
+
+            RouteEntry entry4;
+            entry4.push_back(Track(line.point_ids[i], line_id, static_cast<int>(i), false), geomap);
+            entry4.is_special = true;
+            q.push(std::move(entry4));
         }
     }
 
@@ -216,14 +241,13 @@ void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
             continue;
         }
         for (const auto& next : nexts) {
-            entry.tracks.push_back(next);
             RouteEntry new_entry = entry;
+            new_entry.push_back(next, geomap);
             if (geomap.special_lines.contains(next.line_id) && !is_special) {
                 new_entry.is_special = true;
-                new_entry.base_size = static_cast<int>(entry.tracks.size());
+                new_entry.base_size = static_cast<int>(entry.stations());
             }
             q.push(std::move(new_entry));
-            entry.tracks.pop_back();
         }
     }
 }
