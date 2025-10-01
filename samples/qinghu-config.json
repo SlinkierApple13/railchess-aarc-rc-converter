@@ -1,0 +1,28 @@
+{
+  "segmentation_length": 20,
+  "group_distance": 1.0,
+  "link_modes": {
+    "ThickLine": "Group",
+    "ThinLine": "Connect"
+  },
+  "friend_lines": [
+    ["00", "0a"],
+    ["00a", "0d"],
+    ["000", "0a"],
+    ["000c", "0a"],
+    ["000a", "0"],
+    ["000b", "0"],
+    ["02", "2"],
+    ["1a", "1a"],
+    ["6", "6"]
+  ],
+  "merged_lines": [
+    ["1", "1a"],
+    ["17", "17b"]
+  ],
+  "segmented_lines": [
+    "0", "0a", "0b", "0c", "0d", "0e", "0f", "0g", "0h", "0j", "0k", "0m", "0n",
+    "00", "00a",
+    "000", "000a", "000b", "000c"
+  ]
+}
