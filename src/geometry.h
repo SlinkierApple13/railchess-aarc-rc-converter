@@ -77,7 +77,7 @@ struct StationGroup {
 
 struct Map {
     struct Config {
-        int max_length = 128;
+        int max_length = 512;
         int max_rc_steps = 16;
         double auto_group_distance = 25.0;
         bool merge_consecutive_duplicates = true;

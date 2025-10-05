@@ -3,7 +3,16 @@
 
 #include "converter.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 int main(int argc, char* argv[]) {
+// enable utf8 on Windows console
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+#endif
+
     char* input_aarc;
     char* output_rc;
     char* config_json;
