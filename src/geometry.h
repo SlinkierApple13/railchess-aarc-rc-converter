@@ -45,7 +45,7 @@ using Position = Vec2;
 
 struct Point {
     int id;
-    double size;
+    double size = 1.0;
     std::string name;
     Position pos;
 
