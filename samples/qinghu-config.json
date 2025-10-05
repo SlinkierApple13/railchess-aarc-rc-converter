@@ -1,6 +1,8 @@
 {
-  "segmentation_length": 20,
+  "max_rc_steps": 12,
   "group_distance": 1.0,
+  "optimize_segmentation": true,
+  "optimize_iterations": 5,
   "link_modes": {
     "ThickLine": "Group",
     "ThinLine": "Connect"

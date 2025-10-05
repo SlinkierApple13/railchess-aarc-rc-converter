@@ -76,9 +76,11 @@ struct StationGroup {
 struct Map {
     struct Config {
         int max_length = 128;
-        int max_length_special = 32;
+        int max_rc_steps = 16;
         double auto_group_distance = 30.0;
         bool merge_consecutive_duplicates = true;
+        bool optimize_segmentation = false;
+        int max_iterations = 4;
         
         enum class LinkMode {
             Connect,
@@ -101,6 +103,10 @@ struct Map {
             {LinkType::DottedLine2, LinkMode::None},
             {LinkType::Group, LinkMode::Group}
         };
+
+        std::unordered_set<std::pair<int, int>> friend_lines;
+        std::unordered_set<std::pair<int, int>> merged_lines;
+        std::unordered_map<int, int> segmented_lines; // line_id -> segment_length
     } config;
 
     double width;
@@ -111,10 +117,6 @@ struct Map {
 
     std::unordered_map<int, StationGroup> station_groups;
     std::unordered_map<int, StationGroup*> point_to_group;
-    
-    std::unordered_set<std::pair<int, int>> friend_lines;
-    std::unordered_set<std::pair<int, int>> merged_lines;
-    std::unordered_set<int> special_lines;
 
     bool can_move_through(int point1_id, int point2_id, int point3_id) const;
     Position group_pos(int group_id) const;

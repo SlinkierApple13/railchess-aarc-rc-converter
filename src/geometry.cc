@@ -206,9 +206,11 @@ static std::vector<Position> coord_fill_unordered(
     return {};
 }
 
-static std::vector<Position> coord_fill(const Position& a, const Position& b,
-                                        double x_diff, double y_diff,
-                                        PosRel pos_rel, bool reversed, FillType type) {
+static std::vector<Position> coord_fill(
+    const Position& a, const Position& b,
+    double x_diff, double y_diff,
+    PosRel pos_rel, bool reversed, FillType type
+) {
     auto result = coord_fill_unordered(a, b, x_diff, y_diff, pos_rel, type);
     if (reversed) {
         std::reverse(result.begin(), result.end());
@@ -626,14 +628,14 @@ Map::Map(const nlohmann::json& aarc, const nlohmann::json& config_json) {
     // helper lambdas
     auto connect_lines = [&](int line1_id, int line2_id, bool forced = false) {
         if (line1_id == line2_id && !forced) return;
-        friend_lines.insert({line1_id, line2_id});
-        friend_lines.insert({line2_id, line1_id});
+        config.friend_lines.insert({line1_id, line2_id});
+        config.friend_lines.insert({line2_id, line1_id});
     };
 
     auto merge_lines = [&](int line1_id, int line2_id, bool forced = false) {
         if (line1_id == line2_id && !forced) return;
-        merged_lines.insert({line1_id, line2_id});
-        merged_lines.insert({line2_id, line1_id});
+        config.merged_lines.insert({line1_id, line2_id});
+        config.merged_lines.insert({line2_id, line1_id});
     };
 
     auto join_stations = [&](int station1_id, int station2_id) {
@@ -720,19 +722,40 @@ Map::Map(const nlohmann::json& aarc, const nlohmann::json& config_json) {
     
     // parse config
     if (config_json.contains("max_length")) {
-        config.max_length = config_json["max_length"].get<int>();
+        int max_length = config_json["max_length"].get<int>();
+        if (max_length > 0) {
+            config.max_length = max_length;
+        }
     }
-    if (config_json.contains("segmentation_length")) {
-        config.max_length_special = config_json["segmentation_length"].get<int>();
+    if (config_json.contains("max_rc_steps")) {
+        int max_rc_steps = config_json["max_rc_steps"].get<int>();
+        if (max_rc_steps > 0) {
+            config.max_rc_steps = max_rc_steps;
+        }
+    }
+    if (config_json.contains("max_iterations")) {
+        int max_iterations = config_json["max_iterations"].get<int>();
+        if (max_iterations > 0) {
+            config.max_iterations = max_iterations;
+        }
     }
     if (config_json.contains("raw_group_distance")) {
-        config.auto_group_distance = config_json["raw_group_distance"].get<double>();
+        double auto_group_distance = config_json["raw_group_distance"].get<double>();
+        if (auto_group_distance >= 0.0) {
+            config.auto_group_distance = auto_group_distance;
+        }
     }
     if (config_json.contains("group_distance")) {
-        config.auto_group_distance = config_json["group_distance"].get<double>() * 30.0;
+        double auto_group_distance = config_json["group_distance"].get<double>();
+        if (auto_group_distance >= 0.0) {
+            config.auto_group_distance = auto_group_distance * 30.0;
+        }
     }
     if (config_json.contains("merge_consecutive_duplicates")) {
         config.merge_consecutive_duplicates = config_json["merge_consecutive_duplicates"].get<bool>();
+    }
+    if (config_json.contains("optimize_segmentation")) {
+        config.optimize_segmentation = config_json["optimize_segmentation"].get<bool>();
     }
 
     if (config_json.contains("link_modes")) {
@@ -811,24 +834,93 @@ Map::Map(const nlohmann::json& aarc, const nlohmann::json& config_json) {
     }
 
     if (config_json.contains("segmented_lines")) {
+        int param_ind = 0;
         for (const auto& entry : config_json["segmented_lines"]) {
-            int line_id = -1;
-            if (entry.is_string()) {
-                std::string name = entry.get<std::string>();
+            ++param_ind;
+            if (entry.is_array()) {
+                for (const auto& sub_entry : entry) {
+                    if (sub_entry.is_string() || sub_entry.is_number_integer()) {
+                        int line_id = -1;
+                        if (sub_entry.is_string()) {
+                            std::string name = sub_entry.get<std::string>();
+                            for (const auto& [id, line] : lines) {
+                                if (line.name == name) {
+                                    line_id = id;
+                                    break;
+                                }
+                            }
+                        } else if (sub_entry.is_number_integer()) {
+                            int id = sub_entry.get<int>();
+                            if (lines.find(id) != lines.end()) {
+                                line_id = id;
+                            }
+                        }
+                        if (line_id != -1) {
+                            config.segmented_lines[line_id] = -param_ind;
+                        }
+                    }
+                }
+                continue;
+            }
+            if (entry.is_string() || entry.is_number_integer()) {
+                int line_id = -1;
+                if (entry.is_string()) {
+                    std::string name = entry.get<std::string>();
+                    for (const auto& [id, line] : lines) {
+                        if (line.name == name) {
+                            line_id = id;
+                            break;
+                        }
+                    }
+                } else if (entry.is_number_integer()) {
+                    int id = entry.get<int>();
+                    if (lines.find(id) != lines.end()) {
+                        line_id = id;
+                    }
+                }
+                if (line_id != -1) {
+                    config.segmented_lines[line_id] = -param_ind;
+                }
+                continue;
+            }
+            if (!entry.contains("line") && !entry.contains("lines")) continue;
+            int seg_len = -param_ind;
+            if (entry.contains("segment_length")) {
+                int seg_len1 = entry["segment_length"].get<int>();
+                if (seg_len1 > 0) {
+                    seg_len = seg_len1;
+                }
+            }
+            if (entry.contains("line") && entry["line"].is_string()) {
+                std::string name = entry["line"].get<std::string>();
                 for (const auto& [id, line] : lines) {
                     if (line.name == name) {
-                        line_id = id;
+                        config.segmented_lines[id] = seg_len;
                         break;
                     }
                 }
-            } else if (entry.is_number_integer()) {
-                int id = entry.get<int>();
+            } else if (entry.contains("line") && entry["line"].is_number_integer()) {
+                int id = entry["line"].get<int>();
                 if (lines.find(id) != lines.end()) {
-                    line_id = id;
+                    config.segmented_lines[id] = seg_len;
                 }
-            }
-            if (line_id != -1) {
-                special_lines.insert(line_id);
+            } else if (entry.contains("lines") && entry["lines"].is_array()) {
+                for (const auto& sub_entry : entry["lines"]) {
+                    if (sub_entry.is_string()) {
+                        std::string name = sub_entry.get<std::string>();
+                        for (const auto& [id, line] : lines) {
+                            if (line.name == name) {
+                                config.segmented_lines[id] = seg_len;
+                                break;
+                            }
+                        }
+                    } else if (sub_entry.is_number_integer()) {
+                        int id = sub_entry.get<int>();
+                        if (lines.find(id) != lines.end()) {
+                            config.segmented_lines[id] = seg_len;
+                        }
+                    }
+                }
             }
         }
     }
@@ -879,6 +971,13 @@ Map::Map(const nlohmann::json& aarc, const nlohmann::json& config_json) {
             if (line1.parent_id == line2.parent_id) {
                 connect_lines(id1, id2);
             }
+        }
+    }
+
+    // ensure that specified segmentation length is strictly greater than max_rc_steps
+    for (auto& [line_id, seg_len] : config.segmented_lines) {
+        if (seg_len >= 0 && seg_len <= config.max_rc_steps) {
+            seg_len = config.max_rc_steps + 1;
         }
     }
 }
