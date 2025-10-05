@@ -697,6 +697,29 @@ Map::Map(const nlohmann::json& aarc, const nlohmann::json& config_json) {
         }
     }
 
+    // load line width -> point size map
+    std::unordered_map<int, double> line_width_to_point_size;
+    if (aarc.contains("config")) {
+        const auto& conf = aarc["config"];
+        if (conf.contains("lineWidthMapped")) {
+            const auto& lw_map = conf["lineWidthMapped"];
+            if (lw_map.is_object()) {
+                for (auto& [key, value] : lw_map.items()) {
+                    double line_width;
+                    try {
+                        line_width = std::stod(key);
+                    } catch (...) {
+                        continue;
+                    }
+                    if (value.contains("staSize")) {
+                        double point_size = value["staSize"].get<double>();
+                        line_width_to_point_size[static_cast<int>(line_width * 100.0 + 0.5)] = point_size;
+                    }
+                }
+            }
+        }
+    }
+
     // load lines
     if (aarc.contains("lines")) {
         for (const auto& item : aarc["lines"]) {
@@ -716,6 +739,42 @@ Map::Map(const nlohmann::json& aarc, const nlohmann::json& config_json) {
                 l.parent_id = -1;
             }
             if (l.id > max_line_id) max_line_id = l.id;
+
+            // get point size from line width
+            double point_size;
+            if (item.contains("width")) {
+                double line_width;
+                if (item["width"].is_number_integer()) {
+                    line_width = static_cast<double>(item["width"].get<int>());
+                } else if (item["width"].is_number_float()) {
+                    line_width = item["width"].get<double>();
+                } else if (item["width"].is_string()) {
+                    try {
+                        line_width = std::stod(item["width"].get<std::string>());
+                    } catch (...) {
+                        line_width = 1.0;
+                    }
+                } else {
+                    line_width = 1.0;
+                }
+                int lw_key = static_cast<int>(line_width * 100.0 + 0.5);
+                if (line_width_to_point_size.contains(lw_key)) {
+                    point_size = line_width_to_point_size[lw_key];
+                } else {
+                    point_size = line_width;
+                }
+            } else {
+                point_size = 1.0;
+            }
+
+            // update point size for all points in this line
+            for (int pid : l.point_ids) {
+                if (points.contains(pid)) {
+                    Point& p = points.at(pid);
+                    p.size = std::max(p.size, point_size);
+                }
+            }
+
             lines[l.id] = std::move(l);
         }
     }
@@ -737,18 +796,6 @@ Map::Map(const nlohmann::json& aarc, const nlohmann::json& config_json) {
         int max_iterations = config_json["max_iterations"].get<int>();
         if (max_iterations > 0) {
             config.max_iterations = max_iterations;
-        }
-    }
-    if (config_json.contains("raw_group_distance")) {
-        double auto_group_distance = config_json["raw_group_distance"].get<double>();
-        if (auto_group_distance >= 0.0) {
-            config.auto_group_distance = auto_group_distance;
-        }
-    }
-    if (config_json.contains("group_distance")) {
-        double auto_group_distance = config_json["group_distance"].get<double>();
-        if (auto_group_distance >= 0.0) {
-            config.auto_group_distance = auto_group_distance * 30.0;
         }
     }
     if (config_json.contains("merge_consecutive_duplicates")) {
@@ -957,7 +1004,9 @@ Map::Map(const nlohmann::json& aarc, const nlohmann::json& config_json) {
         for (const auto& [id2, p2] : points) {
             if (id1 >= id2) continue;
             if (p2.type != Point::Type::Station) continue;
-            if ((p1.pos - p2.pos).length() <= config.auto_group_distance) {
+            double group_distance = config.auto_group_distance;
+            group_distance *= (p1.size + p2.size) / 2.0;
+            if ((p1.pos - p2.pos).length() <= group_distance) {
                 join_stations(id1, id2);
             }
         }
@@ -979,6 +1028,63 @@ Map::Map(const nlohmann::json& aarc, const nlohmann::json& config_json) {
         if (seg_len >= 0 && seg_len <= config.max_rc_steps) {
             seg_len = config.max_rc_steps + 1;
         }
+    }
+
+    // check loop lines more thoroughly
+    for (auto& [line_id, line] : lines) {
+        if (line.is_loop) continue;
+        int period = 0;
+        for (int i = 1; i < line.point_ids.size(); ++i) {
+            if (period == 0 && line.point_ids[i] == line.point_ids[0]) {
+                period = i;
+            } else if (period != 0 && line.point_ids[i] != line.point_ids[i % period]) {
+                period = 0;
+                break;
+            }
+        }
+        if (period) {
+            line.is_loop = true;
+            line.point_ids.resize(period + 1);
+        }
+    }
+
+    // if a line is not in the segmentation list, has no friends or merges, 
+    // and has no duplicate stations, it is considered simple
+    for (auto& [line_id, line] : lines) {
+        line.is_simple = false;
+        if (config.segmented_lines.contains(line_id)) continue;
+        bool has_friends = false;
+        for (const auto& [l1, l2] : config.friend_lines) {
+            if (l1 == line_id || l2 == line_id) {
+                has_friends = true;
+                break;
+            }
+        }
+        if (has_friends) continue;
+        bool has_merges = false;
+        for (const auto& [l1, l2] : config.merged_lines) {
+            if (l1 == line_id || l2 == line_id) {
+                has_merges = true;
+                break;
+            }
+        }
+        if (has_merges) continue;
+        std::unordered_set<int> station_set;
+        bool has_duplicates = false;
+        // if loop line, ignore the last point (same as first)
+        int limit = line.is_loop ? static_cast<int>(line.point_ids.size()) - 1 : static_cast<int>(line.point_ids.size());
+        for (int i = 0; i < limit; ++i) {
+            int pid = line.point_ids[i];
+            if (points.contains(pid) && points.at(pid).type == Point::Type::Station) {
+                if (station_set.contains(pid)) {
+                    has_duplicates = true;
+                    break;
+                }
+                station_set.insert(pid);
+            }
+        }
+        if (has_duplicates) continue;
+        line.is_simple = true;
     }
 }
 

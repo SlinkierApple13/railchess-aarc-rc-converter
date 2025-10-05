@@ -45,6 +45,7 @@ using Position = Vec2;
 
 struct Point {
     int id;
+    double size;
     std::string name;
     Position pos;
 
@@ -64,6 +65,7 @@ struct Line {
     std::string name;
     std::vector<int> point_ids;
     bool is_loop;
+    bool is_simple;
     int parent_id;
 };
 
@@ -77,7 +79,7 @@ struct Map {
     struct Config {
         int max_length = 128;
         int max_rc_steps = 16;
-        double auto_group_distance = 30.0;
+        double auto_group_distance = 26.0;
         bool merge_consecutive_duplicates = true;
         bool optimize_segmentation = false;
         int max_iterations = 4;

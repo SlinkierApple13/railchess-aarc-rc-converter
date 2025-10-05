@@ -35,14 +35,13 @@
 |设置项|用途|默认|
 |---|---|---|
 |`max_length`|交路的最大长度 (车站与参考点的总数；下同) 参数 (一般情况下该参数无需调整；如果生成的交路不完整，请调大这一数值)。|`128`|
-|`group_distance`|将多个车站合并的距离阈值 (单位：`30px`).|`1.0`|
 |`merge_consecutive_duplicates`|如果同一交路的相邻两站是同一车站且该设置项为 `true`，合并之。|`true`|
 |`link_modes`|对不同车站连线的处理；具体见样例。支持五种不同的连线：粗线 `ThickLine`，细线 `ThinLine`，虚线 (原色) `DottedLine1`，虚线 (覆盖) `DottedLine2`，车站团 `Group`；对每种连线有三种处理方式：合并 `Group`，(用一条线路) 连接 `Connect`，忽略 `None`.| 粗线：连接，细线：连接，虚线：忽略，车站团：合并
 |`friend_lines`|可跨线运行的线路列表。(可以用输入文件中的线路编号或线路名称表示线路；下同。)|无|
 |`merged_lines`|贯通运行的线路列表。|无|
 |`max_rc_steps`|分段处理时需要支持的轨交棋游戏内随机数最大值。|`16`|
 |`optimize_segmentation`|是否开启分段处理优化。若开启，转换工具将尝试尽可能减少导出轨交棋存档中录入的线路数量。|`false`|
-|`optimize_iterations`|分段处理优化迭代次数，|`5`|
+|`optimize_iterations`|分段处理优化迭代次数。|`5`|
 |`segmented_lines`|一个列表，包括分段处理的线路列表和对应的分段长度；具体见下文。如果不指定分段长度，转换工具会将之设为 `max_rc_steps` 的两倍（若不使用分段处理优化），或（若使用分段处理优化）自动选取一个使得导出轨交棋存档中录入线路数量较小的数值。|无|
 
 `segmented_lines` 列表中的每项可以是以下几种形式： 
@@ -59,7 +58,6 @@
 
 ```JSON
 {
-  "group_distance": 1.25,
   "link_modes": {
     "DottedLine1": "Connect",
     "DottedLine2": "Connect",
@@ -81,7 +79,6 @@
 ```JSON
 {
   "max_length": 200,
-  "group_distance": 1.75,
   "merge_consecutive_duplicates": false,
   "link_modes": {
     "ThickLine": "Group",

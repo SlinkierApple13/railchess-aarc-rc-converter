@@ -181,7 +181,6 @@ std::unordered_map<int, rc::Line> get_lines(
         }
     }
     
-    // helper lambdas
     auto add_line = [&](const std::vector<Track>& tracks) {
         if (tracks.size() < 2) return;
         rc::Line line;
@@ -237,6 +236,24 @@ std::unordered_map<int, rc::Line> get_lines(
     for (const auto& [line_id, line] : geomap.lines) {
         if (!lines_mask.empty() && !lines_mask.contains(line_id)) continue;
         if (line.point_ids.size() < 2) continue;
+
+        if (line.is_simple) {
+            // just remove nodes and consecutive duplicate stations
+            rc::Line simple_line;
+            simple_line.id = lines.size() + 1;
+            simple_line.is_loop = line.is_loop;
+            for (int pid : line.point_ids) {
+                if (!geomap.points.contains(pid)) continue;
+                const auto& point = geomap.points.at(pid);
+                if (point.type != geometry::Point::Type::Station) continue;
+                int id = geomap.point_to_group.contains(point.id) ? geomap.point_to_group.at(point.id)->id : point.id;
+                if (!geomap.config.merge_consecutive_duplicates || simple_line.station_ids.empty() || simple_line.station_ids.back() != id) {
+                    simple_line.station_ids.push_back(id);
+                }
+            }
+            lines.emplace(lines.size() + 1, std::move(simple_line));
+            continue;
+        }
         
         RouteEntry entry1;
         entry1.push_back(Track(line.point_ids.front(), line_id, 0, true), geomap, segmented_lines);
