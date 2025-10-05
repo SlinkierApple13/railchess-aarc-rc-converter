@@ -79,7 +79,7 @@ struct Map {
     struct Config {
         int max_length = 128;
         int max_rc_steps = 16;
-        double auto_group_distance = 26.0;
+        double auto_group_distance = 25.0;
         bool merge_consecutive_duplicates = true;
         bool optimize_segmentation = false;
         int max_iterations = 4;

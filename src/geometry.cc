@@ -1006,7 +1006,7 @@ Map::Map(const nlohmann::json& aarc, const nlohmann::json& config_json) {
             if (p2.type != Point::Type::Station) continue;
             double group_distance = config.auto_group_distance;
             group_distance *= (p1.size + p2.size) / 2.0;
-            if ((p1.pos - p2.pos).length() <= group_distance) {
+            if ((p1.pos - p2.pos).length() <= group_distance + 1e-3) {
                 join_stations(id1, id2);
             }
         }
