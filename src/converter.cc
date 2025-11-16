@@ -148,24 +148,6 @@ std::unordered_map<int, rc::Line> get_lines(
                     .forward = false
                 });
             }
-            // if (i == 0 && line.is_loop) {
-            //     points[pid].tracks.push_back(Track{
-            //         .point_id = pid,
-            //         .line_id = line_id,
-            //         .index_in_line = static_cast<int>(i),
-            //         .forward = false,
-            //         .next_index = static_cast<int>(line.point_ids.size()) - 1
-            //     });
-            // }
-            // if (i + 1 == line.point_ids.size() && line.is_loop) {
-            //     points[pid].tracks.push_back(Track{
-            //         .point_id = pid,
-            //         .line_id = line_id,
-            //         .index_in_line = static_cast<int>(i),
-            //         .forward = true,
-            //         .next_index = 0
-            //     });
-            // }
             if (i == 0 && !line.is_loop) {
                 points[pid].tracks.push_back(Track{
                     .point_id = pid,
@@ -504,10 +486,28 @@ void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
     rcmap.lines = get_lines(geomap, rcmap, segmented_lines);
 }
 
+void remove_orphaned_stations(rc::Map& rcmap) {
+    // if a station is not used in any line, remove it
+    std::unordered_set<int> used_stations;
+    for (const auto& [line_id, line] : rcmap.lines) {
+        for (int station_id : line.station_ids) {
+            used_stations.insert(station_id);
+        }
+    }
+    for (auto it = rcmap.stations.begin(); it != rcmap.stations.end(); ) {
+        if (!used_stations.contains(it->first)) {
+            it = rcmap.stations.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 rc::Map convert_to_rc(const geometry::Map& geomap) {
     rc::Map rcmap;
     add_stations(geomap, rcmap);
     add_lines(geomap, rcmap);
+    remove_orphaned_stations(rcmap);
     return rcmap;
 }
 
