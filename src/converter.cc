@@ -1,4 +1,3 @@
-#include <iostream>
 #include <queue>
 
 #include "converter.h"
@@ -118,7 +117,8 @@ std::unordered_map<int, rc::Line> get_lines(
     const geometry::Map& geomap, const rc::Map& rcmap,
     const std::unordered_map<int, int>& og_segmented_lines,
     const std::unordered_set<int>& lines_mask = {},
-    std::vector<int>* extra_segmented_lines = nullptr
+    std::vector<int>* extra_segmented_lines = nullptr,
+    std::atomic<bool>* cancel_flag = nullptr
 ) {
     std::unordered_map<int, rc::Line> lines;
     std::unordered_map<int, int> new_segmented_lines;
@@ -317,6 +317,11 @@ rst: // goto label to restart search if segmentation changes
 
     // do breadth-first search; no need to track visited states as we care about all possible routes
     while (!q.empty()) {
+        // Check cancellation flag
+        if (cancel_flag && cancel_flag->load()) {
+            throw std::runtime_error("Conversion cancelled due to timeout");
+        }
+        
         ++counter;
         
         // check every 256 iterations for segmentation adjustment
@@ -331,13 +336,13 @@ rst: // goto label to restart search if segmentation changes
                     }
 
                     // log adjustment
-                    std::string name_disp = geomap.lines.at(line_id).name;
-                    if (!name_disp.empty()) {
-                        name_disp = " \"" + name_disp + "\"";
-                    }
-                    std::cout << "[INFO] Applying auto-segmentation (max_rc_steps: " << geomap.config.max_rc_steps << 
-                              ") for line # " << std::setw(4) << line_id << name_disp << '.'
-                              << std::endl;
+                    // std::string name_disp = geomap.lines.at(line_id).name;
+                    // if (!name_disp.empty()) {
+                    //     name_disp = " \"" + name_disp + "\"";
+                    // }
+                    // std::cout << "[INFO] Applying auto-segmentation (max_rc_steps: " << geomap.config.max_rc_steps << 
+                    //           ") for line # " << std::setw(4) << line_id << name_disp << '.'
+                    //           << std::endl;
                 }
             }
             if (adjusted) {
@@ -383,7 +388,7 @@ rst: // goto label to restart search if segmentation changes
 
 }
 
-void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
+void add_lines(const geometry::Map& geomap, rc::Map& rcmap, std::atomic<bool>* cancel_flag = nullptr) {
     std::unordered_map<int, int> segmented_lines = geomap.config.segmented_lines;
     std::vector<int> adjusted_lines;
     std::unordered_map<int, rc::Line> base_lines;
@@ -393,7 +398,7 @@ void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
             seg_len = geomap.config.max_rc_steps << 1;
         }
     }
-    base_lines = get_lines(geomap, rcmap, segmented_lines, {}, &adjusted_lines);
+    base_lines = get_lines(geomap, rcmap, segmented_lines, {}, &adjusted_lines, cancel_flag);
 
     if (!geomap.config.optimize_segmentation) {
         rcmap.lines = base_lines;
@@ -451,7 +456,7 @@ void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
 
     // Gradient descent to minimize the number of lines
     auto get_line_count = [&](const std::unordered_map<int, int>& seg_config) {
-        auto temp_lines = get_lines(geomap, rcmap, seg_config, lines_mask);
+        auto temp_lines = get_lines(geomap, rcmap, seg_config, lines_mask, nullptr, cancel_flag);
         return static_cast<int>(temp_lines.size());
     };
 
@@ -463,6 +468,11 @@ void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
     while (improved && iteration < max_iterations) {
         improved = false;
         ++iteration;
+        
+        // Check cancellation flag
+        if (cancel_flag && cancel_flag->load()) {
+            throw std::runtime_error("Conversion cancelled due to timeout");
+        }
         
         const std::vector<int> deltas = iteration < 3 ? 
             std::vector<int>{-11, -5, -2, 2, 5, 11} : 
@@ -505,13 +515,30 @@ void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
         }
     }
 
-    rcmap.lines = get_lines(geomap, rcmap, segmented_lines);
+    rcmap.lines = get_lines(geomap, rcmap, segmented_lines, {}, nullptr, cancel_flag);
 }
 
-rc::Map convert_to_rc(const geometry::Map& geomap) {
+void remove_orphaned_stations(rc::Map& rcmap) {
+    std::unordered_set<int> used_stations;
+    for (const auto& [line_id, line] : rcmap.lines) {
+        for (int station_id : line.station_ids) {
+            used_stations.insert(station_id);
+        }
+    }
+    for (auto it = rcmap.stations.begin(); it != rcmap.stations.end(); ) {
+        if (!used_stations.contains(it->first)) {
+            it = rcmap.stations.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+rc::Map convert_to_rc(const geometry::Map& geomap, std::atomic<bool>* cancel_flag) {
     rc::Map rcmap;
     add_stations(geomap, rcmap);
-    add_lines(geomap, rcmap);
+    add_lines(geomap, rcmap, cancel_flag);
+    remove_orphaned_stations(rcmap);
     return rcmap;
 }
 
