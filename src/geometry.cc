@@ -740,9 +740,23 @@ Map::Map(const nlohmann::json& aarc, const nlohmann::json& config_json) {
             }
             if (l.id > max_line_id) max_line_id = l.id;
 
-            // get point size from line width
+            // get point size
             double point_size;
-            if (item.contains("width")) {
+            if (item.contains("ptSize")) {
+                if (item["ptSize"].is_number_integer()) {
+                    point_size = static_cast<double>(item["ptSize"].get<int>());
+                } else if (item["ptSize"].is_number_float()) {
+                    point_size = item["ptSize"].get<double>();
+                } else if (item["ptSize"].is_string()) {
+                    try {
+                        point_size = std::stod(item["ptSize"].get<std::string>());
+                    } catch (...) {
+                        point_size = 1.0;
+                    }
+                } else {
+                    point_size = 1.0;
+                }
+            } else if (item.contains("width")) {
                 double line_width;
                 if (item["width"].is_number_integer()) {
                     line_width = static_cast<double>(item["width"].get<int>());
