@@ -741,7 +741,7 @@ Map::Map(const nlohmann::json& aarc, const nlohmann::json& config_json) {
             if (l.id > max_line_id) max_line_id = l.id;
 
             // get point size
-            double point_size;
+            double point_size = 0.0;
             if (item.contains("ptSize")) {
                 if (item["ptSize"].is_number_integer()) {
                     point_size = static_cast<double>(item["ptSize"].get<int>());
@@ -756,29 +756,32 @@ Map::Map(const nlohmann::json& aarc, const nlohmann::json& config_json) {
                 } else {
                     point_size = 1.0;
                 }
-            } else if (item.contains("width")) {
-                double line_width;
-                if (item["width"].is_number_integer()) {
-                    line_width = static_cast<double>(item["width"].get<int>());
-                } else if (item["width"].is_number_float()) {
-                    line_width = item["width"].get<double>();
-                } else if (item["width"].is_string()) {
-                    try {
-                        line_width = std::stod(item["width"].get<std::string>());
-                    } catch (...) {
+            }
+            if (point_size < 1e-3) {
+                if (item.contains("width")) {
+                    double line_width;
+                    if (item["width"].is_number_integer()) {
+                        line_width = static_cast<double>(item["width"].get<int>());
+                    } else if (item["width"].is_number_float()) {
+                        line_width = item["width"].get<double>();
+                    } else if (item["width"].is_string()) {
+                        try {
+                            line_width = std::stod(item["width"].get<std::string>());
+                        } catch (...) {
+                            line_width = 1.0;
+                        }
+                    } else {
                         line_width = 1.0;
                     }
+                    int lw_key = static_cast<int>(line_width * 100.0 + 0.5);
+                    if (line_width_to_point_size.contains(lw_key)) {
+                        point_size = line_width_to_point_size[lw_key];
+                    } else {
+                        point_size = line_width;
+                    }
                 } else {
-                    line_width = 1.0;
+                    point_size = 1.0;
                 }
-                int lw_key = static_cast<int>(line_width * 100.0 + 0.5);
-                if (line_width_to_point_size.contains(lw_key)) {
-                    point_size = line_width_to_point_size[lw_key];
-                } else {
-                    point_size = line_width;
-                }
-            } else {
-                point_size = 1.0;
             }
 
             // update point size for all points in this line
