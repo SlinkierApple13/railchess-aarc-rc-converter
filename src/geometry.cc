@@ -795,6 +795,13 @@ Map::Map(const nlohmann::json& aarc, const nlohmann::json& config_json) {
             lines[l.id] = std::move(l);
         }
     }
+
+    // set size to 1.0 for points that are not on any line
+    for (auto& [pid, point] : points) {
+        if (point.size < 1e-3) {
+            point.size = 1.0;
+        }
+    }
     
     // parse config
     if (config_json.contains("max_length")) {
