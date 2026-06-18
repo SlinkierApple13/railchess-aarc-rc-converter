@@ -72,52 +72,45 @@ struct RouteEntry {
     }
 };
 
-void remove_duplicate_lines(std::unordered_map<int, rc::Line>& lines) {
-    // if line A is identical to line B or the inverse of line B, remove the one with the larger id
-    // if line A or the inverse of line A is a sub-route of line B, remove line A
+// if new line or the inverse of new line is a sub-route of existing line, do nothing
+// if existing line or the inverse of existing line is a sub-route of new line, remove existing line and add new line
+void add_and_remove_duplicate(std::unordered_map<int, rc::Line>& lines, rc::Line&& new_line) {
+    if (new_line.station_ids.size() < 2) return;
+    bool erased = false;
     for (auto it = lines.begin(); it != lines.end(); ) {
-        bool erased = false;
-        for (auto it2 = lines.begin(); it2 != lines.end(); ++it2) {
-            if (it == it2) continue;
-            auto& lineA = it->second;
-            auto& lineB = it2->second;
-            std::vector<int> revB = lineB.station_ids;
-            std::reverse(revB.begin(), revB.end());
-            // Check for identical lines first
-            if (lineA.station_ids.size() == lineB.station_ids.size()) {
-                if (lineA.station_ids == lineB.station_ids || lineA.station_ids == revB) {
-                    if (it->first > it2->first) {
-                        it = lines.erase(it);
-                        erased = true;
-                        break;
-                    }
-                    continue; 
-                }
+        auto& line = it->second;
+        std::vector<int> rev_line = line.station_ids;
+        std::reverse(rev_line.begin(), rev_line.end());
+        auto is_subroute = [](const std::vector<int>& a, const std::vector<int>& b) {
+            if (a.empty()) return true;
+            if (a.size() > b.size()) return false;
+            for (size_t i = 0; i <= b.size() - a.size(); ++i) {
+                if (std::equal(a.begin(), a.end(), b.begin() + i)) return true;
             }
-            // If not identical, check for sub-route
-            auto is_subroute = [](const std::vector<int>& a, const std::vector<int>& b) {
-                if (a.empty() || a.size() >= b.size()) return false;
-                for (size_t i = 0; i <= b.size() - a.size(); ++i) {
-                    if (std::equal(a.begin(), a.end(), b.begin() + i)) return true;
-                }
-                return false;
-            };
-            if (is_subroute(lineA.station_ids, lineB.station_ids) || is_subroute(lineA.station_ids, revB)) {
-                it = lines.erase(it);
-                erased = true;
-                break;
-            }
+            return false;
+        };
+        if (!erased && is_subroute(new_line.station_ids, line.station_ids) || 
+                       is_subroute(new_line.station_ids, rev_line)) {
+            // new line is sub-route of existing line, do nothing
+            return;
         }
-        if (!erased) {
-            ++it;
+        if (is_subroute(line.station_ids, new_line.station_ids) || 
+            is_subroute(rev_line, new_line.station_ids)) {
+            // existing line is sub-route of new line, remove existing line
+            it = lines.erase(it);
+            erased = true;
+            continue;
         }
+        ++it;
     }
+    lines.emplace(new_line.id, std::move(new_line));
 }
 
 std::unordered_map<int, rc::Line> get_lines(
     const geometry::Map& geomap, const rc::Map& rcmap,
     const std::unordered_map<int, int>& og_segmented_lines,
     const std::unordered_set<int>& lines_mask = {},
+    int cutoff_line_count = 0,
     std::vector<int>* extra_segmented_lines = nullptr
 ) {
     std::unordered_map<int, rc::Line> lines;
@@ -155,24 +148,24 @@ std::unordered_map<int, rc::Line> get_lines(
                     .forward = false
                 });
             }
-            if (i == 0 && line.is_loop) {
-                points[pid].tracks.push_back(Track{
-                    .point_id = pid,
-                    .line_id = line_id,
-                    .index_in_line = static_cast<int>(i),
-                    .forward = false,
-                    .next_index = static_cast<int>(line.point_ids.size()) - 1
-                });
-            }
-            if (i + 1 == line.point_ids.size() && line.is_loop) {
-                points[pid].tracks.push_back(Track{
-                    .point_id = pid,
-                    .line_id = line_id,
-                    .index_in_line = static_cast<int>(i),
-                    .forward = true,
-                    .next_index = 0
-                });
-            }
+            // if (i == 0 && line.is_loop) {
+            //     points[pid].tracks.push_back(Track{
+            //         .point_id = pid,
+            //         .line_id = line_id,
+            //         .index_in_line = static_cast<int>(i),
+            //         .forward = false,
+            //         .next_index = static_cast<int>(line.point_ids.size()) - 1
+            //     });
+            // }
+            // if (i + 1 == line.point_ids.size() && line.is_loop) {
+            //     points[pid].tracks.push_back(Track{
+            //         .point_id = pid,
+            //         .line_id = line_id,
+            //         .index_in_line = static_cast<int>(i),
+            //         .forward = true,
+            //         .next_index = 0
+            //     });
+            // }
             if (i == 0 && !line.is_loop) {
                 points[pid].tracks.push_back(Track{
                     .point_id = pid,
@@ -193,11 +186,12 @@ std::unordered_map<int, rc::Line> get_lines(
             }
         }
     }
-    
+
+    int cnt = 0;
     auto add_line = [&](const std::vector<Track>& tracks) {
         if (tracks.size() < 2) return;
         rc::Line line;
-        line.id = lines.size() + 1;
+        line.id = ++cnt;
         line.is_loop = false;
         for (const auto& track : tracks) {
             if (!geomap.points.contains(track.point_id)) continue;
@@ -208,7 +202,7 @@ std::unordered_map<int, rc::Line> get_lines(
                 line.station_ids.push_back(id);
             }
         }
-        lines.emplace(line.id, std::move(line));
+        add_and_remove_duplicate(lines, std::move(line));
     };
 
     auto next_tracks = [&](const Track& track) {
@@ -245,7 +239,7 @@ std::unordered_map<int, rc::Line> get_lines(
         return result;
     };
 
-rst: // goto label to restart search if segmentation changes
+restart_search: // we need to restart search if auto-segmentation is applied
 
     lines.clear();
     int route_entry_cnt = 0;
@@ -262,7 +256,7 @@ rst: // goto label to restart search if segmentation changes
         if (line.is_simple) {
             // just remove nodes and consecutive duplicate stations
             rc::Line simple_line;
-            simple_line.id = lines.size() + 1;
+            simple_line.id = ++cnt;
             simple_line.is_loop = line.is_loop;
             for (int pid : line.point_ids) {
                 if (!geomap.points.contains(pid)) continue;
@@ -273,7 +267,7 @@ rst: // goto label to restart search if segmentation changes
                     simple_line.station_ids.push_back(id);
                 }
             }
-            lines.emplace(lines.size() + 1, std::move(simple_line));
+            add_and_remove_duplicate(lines, std::move(simple_line));
             continue;
         }
         
@@ -323,8 +317,10 @@ rst: // goto label to restart search if segmentation changes
         if (extra_segmented_lines && counter == 256) {
             bool adjusted = false;
             for (const auto& [line_id, route_ids] : line_routes) {
-                if (route_ids.size() > 32) {
-                    new_segmented_lines[line_id] = geomap.config.max_rc_steps << 1;
+                if (route_ids.size() > 16) {
+                    new_segmented_lines[line_id] = std::min(
+                        geomap.config.max_rc_steps << 1, geomap.config.max_rc_steps + 6
+                    );
                     adjusted = true;
                     if (extra_segmented_lines) {
                         extra_segmented_lines->push_back(line_id);
@@ -336,13 +332,11 @@ rst: // goto label to restart search if segmentation changes
                         name_disp = " \"" + name_disp + "\"";
                     }
                     std::cout << "[INFO] Applying auto-segmentation (max_rc_steps: " << geomap.config.max_rc_steps << 
-                              ") for line # " << std::setw(4) << line_id << name_disp << '.'
-                              << std::endl;
+                              ") to line # " << std::setw(4) << line_id << name_disp << '.' << std::endl;
                 }
             }
             if (adjusted) {
-                // restart the search
-                goto rst;
+                goto restart_search;
             }
             counter = 0;
         }
@@ -353,6 +347,9 @@ rst: // goto label to restart search if segmentation changes
         std::vector<Track> nexts = next_tracks(last_track);
         if (nexts.empty() || entry.full()) {
             add_line(entry.tracks);
+            if (cutoff_line_count > 0 && lines.size() >= static_cast<size_t>(cutoff_line_count)) {
+                return lines;
+            }
             continue;
         }
         int limit = nexts.size();
@@ -378,9 +375,7 @@ rst: // goto label to restart search if segmentation changes
         q.push(std::move(entry));
     }
 
-    remove_duplicate_lines(lines);
     return lines;
-
 }
 
 void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
@@ -393,7 +388,7 @@ void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
             seg_len = geomap.config.max_rc_steps << 1;
         }
     }
-    base_lines = get_lines(geomap, rcmap, segmented_lines, {}, &adjusted_lines);
+    base_lines = get_lines(geomap, rcmap, segmented_lines, {}, 0, &adjusted_lines);
 
     if (!geomap.config.optimize_segmentation) {
         rcmap.lines = base_lines;
@@ -449,13 +444,14 @@ void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
         }
     }
 
-    // Gradient descent to minimize the number of lines
-    auto get_line_count = [&](const std::unordered_map<int, int>& seg_config) {
-        auto temp_lines = get_lines(geomap, rcmap, seg_config, lines_mask);
+    // stochastic descent to optimize the number of lines
+
+    auto get_line_count = [&](const std::unordered_map<int, int>& seg_config, int best) {
+        auto temp_lines = get_lines(geomap, rcmap, seg_config, lines_mask, best << 1);
         return static_cast<int>(temp_lines.size());
     };
 
-    int current_count = get_line_count(segmented_lines);
+    int current_count = get_line_count(segmented_lines, 0);
     bool improved = true;
     int max_iterations = geomap.config.max_iterations;
     int iteration = 0;
@@ -479,14 +475,14 @@ void add_lines(const geometry::Map& geomap, rc::Map& rcmap) {
                 int new_val = current_val + delta;
                 // Ensure the value stays within reasonable bounds
                 if (new_val <= geomap.config.max_rc_steps) continue;
-                if (new_val >= geomap.config.max_length * 2) continue;
+                if (new_val >= geomap.config.max_length) continue;
 
                 auto temp_config = segmented_lines;
                 // Update all lines in this group with the same value
                 for (int line_id : line_ids) {
                     temp_config[line_id] = new_val;
                 }
-                int new_count = get_line_count(temp_config);
+                int new_count = get_line_count(temp_config, best_count);
 
                 if (new_count < best_count) {
                     best_count = new_count;
